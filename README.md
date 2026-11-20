@@ -1,14 +1,33 @@
 # philips-titanos-unblock
 
-Boot-time ad, telemetry and OTA blocking for rooted Philips TitanOS TVs
-(NT72690 SoC, tested on 43PUS8118/12).
+Root exploit, ad/telemetry blocking and boot fixes for Philips TitanOS TVs
+with the NT72690 SoC. Tested on 43PUS8118/12.
 
-Requires a rooted TV via
-[philips-titanos-tools](https://github.com/abbguslof/philips-titanos-tools).
-The `customer_env.sh` script runs at every boot from
-`/mtd_rwarea/apdat/customer_env.sh`.
+## Legal
 
-## What it does
+This is security research on a device the author owns. Modifying your own
+hardware is lawful in the EU under the interoperability exception
+(Directive 2001/29/EC, Art. 6(2)(b)) and no Spanish law prohibits it.
+These tools are published for educational purposes and personal use on your
+own TV. Do not use them to access devices you do not own.
+
+## How the root works
+
+The TV's Chromium browser (`browser.out`) exposes a Chrome DevTools Protocol
+(CDP) endpoint on port 7788 when a USB drive is present at boot. The exploit
+chain:
+
+1. Insert a USB drive and cold-boot the TV.
+2. `cdp_root.py` connects to CDP on port 7788.
+3. It uses `Page.setDownloadBehavior` to write `customer_env.sh` to
+   `/mtd_rwarea/apdat/`, the persistent read-write area.
+4. The TitanOS boot process sources `/mtd_rwarea/apdat/customer_env.sh` on
+   every startup, giving persistent root.
+
+An alternative path uses `cmd_sender.c`, which talks to the `cmd_daemon`
+SysV message queue — the daemon executes the message via `system()` as root.
+
+## What customer_env.sh does (v14)
 
 - **DNS trampantojo**: blocks all outgoing DNS at T+0 so `browser.out` can't
   resolve `app.titanos.tv` (the cloud launcher that freezes the TV and shows
@@ -47,38 +66,65 @@ The `customer_env.sh` script runs at every boot from
 
 ## Files
 
-- `customer_env.sh` — the boot script (v14). Copy to
-  `/mtd_rwarea/apdat/customer_env.sh` on the TV.
-- `cdp_deploy.py` — deploys files to the TV via Chrome DevTools Protocol
-  (requires the TV's browser to have CDP enabled on port 7788, which happens
-  when a USB drive is present at boot). Adjust the default IPs to match your
-  network.
+### Root exploit
 
-## Install
+- `cdp_root.py` — the main exploit: connects to CDP, writes persistent root
+  hook. Run with USB inserted at boot.
+- `attack.py` — fast version: waits for CDP to appear and runs all attack
+  chains.
+- `fast_probe.py` — discovery tool: enumerates available RPC functions via CDP.
+- `cmd_sender.c` — talks to `cmd_daemon`'s SysV message queue to execute
+  commands as root. Cross-compile with
+  `arm-linux-gnueabihf-gcc -static -o cmd_sender cmd_sender.c`.
+- `quick_test.sh` — quick connectivity and status check.
+
+### Boot script
+
+- `customer_env.sh` — the boot script (v14). Once root is established, copy
+  this to `/mtd_rwarea/apdat/customer_env.sh` on the TV.
+
+### Deployment
+
+- `cdp_deploy.py` — deploys updated files (binary, scripts, config) to the TV
+  via CDP download. Requires USB at boot.
+
+## Usage
+
+### First root
 
 ```bash
-# From a root shell on the TV:
-# 1. Download customer_env.sh
+# 1. Insert USB drive in the TV and cold-boot (unplug AC 10 s, plug back in)
+# 2. Wait for the TV to start, open any browser-based app (TitanOS Store, etc.)
+# 3. Run the exploit from your PC:
+python3 cdp_root.py <tv-ip> <pc-ip>
+
+# 4. After reboot, verify root:
+echo 'id' | nc -w3 <tv-ip> 9999
+# Should print: uid=0(root)
+```
+
+### Install the full boot script
+
+```bash
+# From your PC, serve the files:
+python3 -m http.server 8098
+
+# From the TV root shell:
 wget -O /mtd_rwarea/apdat/customer_env.sh http://<pc-ip>:8098/customer_env.sh
 chmod 755 /mtd_rwarea/apdat/customer_env.sh
 
-# 2. Cold reboot (unplug AC 10 s, plug back in)
-```
-
-Or use `cdp_deploy.py` with a USB drive present at boot:
-
-```bash
-python3 cdp_deploy.py <tv-ip> <pc-ip>
+# Cold reboot to apply
 ```
 
 ## Compatibility
 
 Tested on 43PUS8118/12 (TPN23.6E LA, NT72690, firmware 236.006.169.001,
-kernel 4.19.261). The jailbreak and scripts should work on other NT72690-based
-Philips TitanOS TVs but verify on your specific model.
+kernel 4.19.261). Should work on other NT72690-based Philips TitanOS TVs
+but verify on your specific model. The CDP port 7788 requires a USB drive
+present at boot.
 
 ## Related
 
-- [philips-titanos-tools](https://github.com/abbguslof/philips-titanos-tools) — jailbreak and persistent root
+- [philips-titanos-tools](https://github.com/abbguslof/philips-titanos-tools) — alternative USB autoroot method
 - [Cactarium](https://github.com/pedramteymoori/cactarium) — replacement launcher and dashboard
 - [Jailbreak guide](https://gulo.se/thoughts/philips-titan-os-jailbreak-guide/)

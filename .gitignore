@@ -5,3 +5,5 @@ config.json
 *.dump
 *.bin
 research/
+cmd_sender
+cactarium_config.json
